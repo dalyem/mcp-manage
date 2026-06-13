@@ -1,0 +1,23 @@
+[Unit]
+Description=mcp-manage — central MCP & instruction config manager
+Documentation=https://github.com/daly/mcp-manage
+After=network.target
+
+[Service]
+Type=simple
+# Tokens (__PROJECT_DIR__, __NODE_BIN__, __PORT__, __PATH__) are filled in by
+# scripts/install.sh, which writes the resolved unit to
+# ~/.config/systemd/user/mcp-manage.service. Edit there, or re-run install.sh.
+WorkingDirectory=__PROJECT_DIR__
+Environment=NODE_ENV=production
+Environment=MCP_MANAGE_PORT=__PORT__
+# PATH must include the Node bin dir (also where the agent CLIs live for
+# detection) plus ~/.local/bin (cursor-agent) and the system dirs.
+Environment=PATH=__PATH__
+# Bound to 127.0.0.1 — never exposed directly. Front it with nginx + Tailscale.
+ExecStart=__NODE_BIN__/node __PROJECT_DIR__/node_modules/next/dist/bin/next start -H 127.0.0.1 -p __PORT__
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
