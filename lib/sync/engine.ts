@@ -1,3 +1,4 @@
+import path from "node:path";
 import { and, desc, eq } from "drizzle-orm";
 import { parse as parseToml } from "smol-toml";
 import { db } from "../db/client";
@@ -5,12 +6,22 @@ import {
   agents,
   instructions,
   managedEntries,
+  managedSubagents,
   mcpServers,
   serverTargets,
+  subagentTargets,
+  subagents,
   syncLog,
 } from "../db/schema";
 import { backupFile } from "../backup/backup";
-import { isWritable, parseJsonc, readText, writeText, fileExists } from "../fs-utils";
+import {
+  isWritable,
+  parseJsonc,
+  readText,
+  writeText,
+  fileExists,
+  removeFile,
+} from "../fs-utils";
 import { dirExists } from "../fs-utils";
 import {
   ADAPTER_LIST,
@@ -26,6 +37,8 @@ import {
   type FileChange,
   type HealthLevel,
   type NormalizedServer,
+  type NormalizedSubagent,
+  type SyncKind,
   type SyncResult,
   type SyncStatus,
 } from "../types";
@@ -39,10 +52,19 @@ interface ServerState {
   normalized: NormalizedServer;
 }
 
+interface SubagentState {
+  id: number;
+  enabled: boolean;
+  targets: AgentKey[];
+  normalized: NormalizedSubagent;
+}
+
 interface SyncState {
   servers: ServerState[];
+  subagents: SubagentState[];
   instructionsContent: string;
   managed: Map<AgentKey, string[]>;
+  managedSubagents: Map<AgentKey, string[]>;
   manageEnabled: Map<AgentKey, boolean>;
 }
 
@@ -55,6 +77,19 @@ function rowToNormalized(r: typeof mcpServers.$inferSelect): NormalizedServer {
     env: r.env ?? {},
     url: r.url,
     headers: r.headers ?? {},
+  };
+}
+
+function rowToNormalizedSubagent(
+  r: typeof subagents.$inferSelect,
+): NormalizedSubagent {
+  return {
+    name: r.name,
+    description: r.description,
+    prompt: r.prompt,
+    model: r.model,
+    tools: r.tools ?? [],
+    color: r.color,
   };
 }
 
@@ -88,6 +123,27 @@ export function loadState(): SyncState {
     .where(eq(instructions.scope, "global"))
     .get();
 
+  const subagentRows = db.select().from(subagents).all();
+  const subagentTargetRows = db.select().from(subagentTargets).all();
+  const subagentTargetsById = new Map<number, AgentKey[]>();
+  for (const t of subagentTargetRows) {
+    const list = subagentTargetsById.get(t.subagentId) ?? [];
+    list.push(t.agentKey as AgentKey);
+    subagentTargetsById.set(t.subagentId, list);
+  }
+  const subagentStates: SubagentState[] = subagentRows.map((r) => ({
+    id: r.id,
+    enabled: r.enabled,
+    targets: subagentTargetsById.get(r.id) ?? [...AGENT_KEYS],
+    normalized: rowToNormalizedSubagent(r),
+  }));
+
+  const managedSubs = new Map<AgentKey, string[]>();
+  for (const k of AGENT_KEYS) managedSubs.set(k, []);
+  for (const m of db.select().from(managedSubagents).all()) {
+    managedSubs.get(m.agentKey as AgentKey)?.push(m.name);
+  }
+
   const manageEnabled = new Map<AgentKey, boolean>();
   for (const a of db.select().from(agents).all()) {
     manageEnabled.set(a.key as AgentKey, a.manageEnabled);
@@ -95,8 +151,10 @@ export function loadState(): SyncState {
 
   return {
     servers,
+    subagents: subagentStates,
     instructionsContent: instrRow?.content ?? "",
     managed,
+    managedSubagents: managedSubs,
     manageEnabled,
   };
 }
@@ -105,6 +163,72 @@ function desiredFor(agentKey: AgentKey, state: SyncState): NormalizedServer[] {
   return state.servers
     .filter((s) => s.enabled && s.targets.includes(agentKey))
     .map((s) => s.normalized);
+}
+
+function desiredSubagentsFor(
+  agentKey: AgentKey,
+  state: SyncState,
+): NormalizedSubagent[] {
+  return state.subagents
+    .filter((s) => s.enabled && s.targets.includes(agentKey))
+    .map((s) => s.normalized);
+}
+
+interface SubagentFileChange {
+  name: string;
+  path: string;
+  before: string | null;
+  /** null => the file should be deleted */
+  after: string | null;
+  changed: boolean;
+}
+
+/**
+ * Per-file plan for one agent's subagents: write each desired file (overwriting
+ * drift), and delete any file we previously owned that's no longer desired.
+ * Files we never owned are left untouched. Pure — no IO side effects.
+ */
+function computeSubagentChanges(
+  adapter: AgentAdapter,
+  desired: NormalizedSubagent[],
+  owned: string[],
+): SubagentFileChange[] {
+  const fmt = adapter.subagents;
+  const dir = adapter.agentsDir;
+  if (!fmt || !dir) return [];
+
+  const changes: SubagentFileChange[] = [];
+  const desiredNames = new Set(desired.map((d) => d.name));
+
+  for (const d of desired) {
+    const p = path.join(dir, fmt.fileName(d.name));
+    const before = readText(p);
+    let after: string;
+    try {
+      after = fmt.build(d);
+    } catch {
+      continue;
+    }
+    changes.push({
+      name: d.name,
+      path: p,
+      before,
+      after,
+      changed: after !== before,
+    });
+  }
+
+  // Owned files no longer desired (deleted / disabled / un-targeted) => remove.
+  for (const name of owned) {
+    if (desiredNames.has(name)) continue;
+    const p = path.join(dir, fmt.fileName(name));
+    const before = readText(p);
+    if (before !== null) {
+      changes.push({ name, path: p, before, after: null, changed: true });
+    }
+  }
+
+  return changes;
 }
 
 function configParsesOk(adapter: AgentAdapter, content: string | null): boolean {
@@ -169,6 +293,7 @@ export interface AgentInspection {
   health: AgentHealth;
   serverChange: FileChange;
   instrChange: FileChange | null;
+  subagentChanges: SubagentFileChange[];
 }
 
 /** Read-only: compute changes once and derive health from them. */
@@ -192,12 +317,21 @@ function inspectAgent(adapter: AgentAdapter, state: SyncState): AgentInspection 
   const owned = state.managed.get(key) ?? [];
   const serverChange = computeServerChange(adapter, desired, owned);
   const instrChange = computeInstrChange(adapter, state.instructionsContent);
+  const subagentChanges = computeSubagentChanges(
+    adapter,
+    desiredSubagentsFor(key, state),
+    state.managedSubagents.get(key) ?? [],
+  );
 
   let drift: DriftState = "unknown";
   if (present && configParses) {
     const driftedServers = serverChange.changed && !serverChange.error;
     const driftedInstr = !!instrChange?.changed;
-    drift = driftedServers || driftedInstr ? "drifted" : "in-sync";
+    const driftedSubagents = subagentChanges.some((c) => c.changed);
+    drift =
+      driftedServers || driftedInstr || driftedSubagents
+        ? "drifted"
+        : "in-sync";
   }
 
   const last = db
@@ -255,7 +389,15 @@ function inspectAgent(adapter: AgentAdapter, state: SyncState): AgentInspection 
     messages,
   };
 
-  return { adapter, present, manageEnabled, health, serverChange, instrChange };
+  return {
+    adapter,
+    present,
+    manageEnabled,
+    health,
+    serverChange,
+    instrChange,
+    subagentChanges,
+  };
 }
 
 function setManaged(agentKey: AgentKey, names: string[]): void {
@@ -267,9 +409,20 @@ function setManaged(agentKey: AgentKey, names: string[]): void {
   });
 }
 
+function setManagedSubagents(agentKey: AgentKey, names: string[]): void {
+  db.transaction((tx) => {
+    tx.delete(managedSubagents)
+      .where(eq(managedSubagents.agentKey, agentKey))
+      .run();
+    for (const name of names) {
+      tx.insert(managedSubagents).values({ agentKey, name }).run();
+    }
+  });
+}
+
 function logSync(
   agentKey: AgentKey,
-  kind: "servers" | "instructions",
+  kind: SyncKind,
   status: SyncStatus,
   message: string,
   diff?: string,
@@ -381,6 +534,45 @@ export function syncAll(opts: SyncOptions = {}): SyncResult[] {
         ),
       );
     }
+
+    // --- subagents ---
+    for (const sc of ins.subagentChanges) {
+      if (!sc.changed) continue;
+      const isDelete = sc.after === null;
+      const diff = lineDiff(sc.before, sc.after ?? "");
+      let backupPath: string | undefined;
+      if (!dryRun) {
+        if (sc.before !== null) backupPath = backupFile(key, sc.path) ?? undefined;
+        if (isDelete) removeFile(sc.path);
+        else writeText(sc.path, sc.after as string);
+        logSync(
+          key,
+          "subagents",
+          "ok",
+          `${isDelete ? "removed" : "updated"} ${sc.name}`,
+          diff,
+        );
+      }
+      results.push({
+        agentKey: key,
+        kind: "subagents",
+        status: "ok",
+        changed: true,
+        message: `${dryRun ? "would " : ""}${
+          isDelete ? "remove" : "update"
+        } ${sc.name}`,
+        diff,
+        backupPath,
+        path: sc.path,
+      });
+    }
+    // After syncing, the owned-set reflects the current desired subagent names.
+    if (!dryRun && adapter.subagents) {
+      setManagedSubagents(
+        key,
+        desiredSubagentsFor(key, state).map((d) => d.name),
+      );
+    }
   }
 
   return results;
@@ -389,6 +581,12 @@ export function syncAll(opts: SyncOptions = {}): SyncResult[] {
 export interface AgentStatus extends AgentHealth {
   pendingServers: { path: string; diff: string } | null;
   pendingInstructions: { path: string; diff: string } | null;
+  pendingSubagents: {
+    name: string;
+    path: string;
+    diff: string;
+    deleted: boolean;
+  }[];
 }
 
 export function getStatus(): AgentStatus[] {
@@ -411,6 +609,14 @@ export function getStatus(): AgentStatus[] {
             diff: lineDiff(ins.instrChange.before, ins.instrChange.after),
           }
         : null,
+      pendingSubagents: ins.subagentChanges
+        .filter((c) => c.changed)
+        .map((c) => ({
+          name: c.name,
+          path: c.path,
+          diff: lineDiff(c.before, c.after ?? ""),
+          deleted: c.after === null,
+        })),
     };
   });
 }

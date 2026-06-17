@@ -7,12 +7,14 @@ import type {
   BackupDTO,
   ServerDTO,
   StatusResponse,
+  SubagentDTO,
   SyncResponse,
 } from "./api";
 import { getJSON, sendJSON } from "./api";
 import { Badge, Button, Dot } from "./ui";
 import { StatusPanel } from "./StatusPanel";
 import { ServersPanel } from "./ServersPanel";
+import { SubagentsPanel } from "./SubagentsPanel";
 import { InstructionsPanel } from "./InstructionsPanel";
 import { BackupsPanel } from "./BackupsPanel";
 
@@ -38,6 +40,7 @@ export function Dashboard() {
   const [status, setStatus] = useState<AgentStatus[]>([]);
   const [agents, setAgents] = useState<AgentMeta[]>([]);
   const [servers, setServers] = useState<ServerDTO[]>([]);
+  const [subagents, setSubagents] = useState<SubagentDTO[]>([]);
   const [instructions, setInstructions] = useState("");
   const [backups, setBackups] = useState<BackupDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,15 +50,17 @@ export function Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [st, sv, instr, bk] = await Promise.all([
+      const [st, sv, sa, instr, bk] = await Promise.all([
         getJSON<StatusResponse>("/api/status"),
         getJSON<{ servers: ServerDTO[] }>("/api/servers"),
+        getJSON<{ subagents: SubagentDTO[] }>("/api/subagents"),
         getJSON<{ content: string }>("/api/instructions"),
         getJSON<{ backups: BackupDTO[] }>("/api/backups"),
       ]);
       setStatus(st.status);
       setAgents(st.agents);
       setServers(sv.servers);
+      setSubagents(sa.subagents);
       setInstructions(instr.content);
       setBackups(bk.backups);
       setError(null);
@@ -130,8 +135,8 @@ export function Dashboard() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">mcp-manage</h1>
           <p className="text-sm text-zinc-500">
-            One place to configure MCP servers &amp; global instructions across
-            all your AI coding agents.
+            One place to configure MCP servers, subagents &amp; global
+            instructions across all your AI coding agents.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -171,6 +176,7 @@ export function Dashboard() {
           </section>
 
           <ServersPanel servers={servers} onChanged={onChanged} />
+          <SubagentsPanel subagents={subagents} onChanged={onChanged} />
           <InstructionsPanel content={instructions} onSaved={onChanged} />
           <BackupsPanel backups={backups} onRestored={onChanged} />
         </div>

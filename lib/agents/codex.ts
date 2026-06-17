@@ -3,6 +3,7 @@ import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { HOME } from "../paths";
 import type { NormalizedServer } from "../types";
 import { compact, type AgentAdapter } from "./adapter";
+import { tomlSubagentFormat } from "./subagent-format";
 import {
   asStringArray,
   asStringRecord,
@@ -55,6 +56,8 @@ export const codexAdapter: AgentAdapter = {
   instructionsPath: path.join(HOME, ".codex", "AGENTS.md"),
   binaries: ["codex"],
   configDir: path.join(HOME, ".codex"),
+  agentsDir: path.join(HOME, ".codex", "agents"),
+  subagents: tomlSubagentFormat(),
   parseServers(content) {
     const root = parseRoot(content);
     const servers = root[MCP_KEY];

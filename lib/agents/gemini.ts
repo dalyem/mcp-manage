@@ -2,6 +2,7 @@ import path from "node:path";
 import { HOME } from "../paths";
 import type { NormalizedServer } from "../types";
 import { compact, type AgentAdapter } from "./adapter";
+import { mdSubagentFormat } from "./subagent-format";
 import {
   asStringArray,
   asStringRecord,
@@ -50,6 +51,8 @@ export const geminiAdapter: AgentAdapter = {
   instructionsPath: path.join(HOME, ".gemini", "GEMINI.md"),
   binaries: ["gemini"],
   configDir: path.join(HOME, ".gemini"),
+  agentsDir: path.join(HOME, ".gemini", "agents"),
+  subagents: mdSubagentFormat({ emitName: true, tools: "array" }),
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, { mcpKey: MCP_KEY, toEntry, fromEntry }),

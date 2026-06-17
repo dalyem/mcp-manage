@@ -31,8 +31,28 @@ export interface NormalizedServer {
   headers: Record<string, string>;
 }
 
+/**
+ * The normalized, agent-agnostic representation of a custom subagent. Each
+ * adapter translates this into its agent's concrete on-disk file (markdown +
+ * YAML frontmatter for most; TOML for Codex). The markdown body / TOML
+ * `developer_instructions` field carries `prompt`.
+ */
+export interface NormalizedSubagent {
+  name: string;
+  /** when the agent should delegate to this subagent */
+  description: string;
+  /** the system prompt (file body) */
+  prompt: string;
+  /** model override; "" = inherit each agent's default */
+  model: string;
+  /** tool allowlist; [] = inherit all. Applied best-effort per agent. */
+  tools: string[];
+  /** optional UI color; "" = none */
+  color: string;
+}
+
 export type SyncStatus = "ok" | "skipped" | "error";
-export type SyncKind = "servers" | "instructions";
+export type SyncKind = "servers" | "instructions" | "subagents";
 
 export interface SyncResult {
   agentKey: AgentKey;

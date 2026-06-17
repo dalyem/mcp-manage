@@ -1,8 +1,24 @@
 import type { AgentStatus } from "@/lib/sync/engine";
-import type { AgentMeta, BackupDTO, ServerDTO, ServerInput } from "@/lib/data";
+import type {
+  AgentMeta,
+  BackupDTO,
+  ServerDTO,
+  ServerInput,
+  SubagentDTO,
+  SubagentInput,
+} from "@/lib/data";
 import type { SyncResult } from "@/lib/types";
 
-export type { AgentStatus, AgentMeta, BackupDTO, ServerDTO, ServerInput, SyncResult };
+export type {
+  AgentStatus,
+  AgentMeta,
+  BackupDTO,
+  ServerDTO,
+  ServerInput,
+  SubagentDTO,
+  SubagentInput,
+  SyncResult,
+};
 
 async function handle<T>(r: Response): Promise<T> {
   if (!r.ok) {
