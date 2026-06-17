@@ -38,7 +38,11 @@ function AgentCard({
   const tone: "ok" | "warn" | "error" | "muted" = !s.present
     ? "muted"
     : s.level;
-  const pending = s.pendingServers || s.pendingInstructions;
+  const hasPending = !!(
+    s.pendingServers ||
+    s.pendingInstructions ||
+    s.pendingSubagents.length
+  );
 
   return (
     <Card className="p-4">
@@ -87,7 +91,7 @@ function AgentCard({
               ) : (
                 <Badge tone="muted">unknown</Badge>
               )}
-              {pending && (
+              {hasPending && (
                 <button
                   className="text-xs text-blue-600 hover:underline dark:text-blue-400"
                   onClick={() => setShowDiff((v) => !v)}
@@ -109,7 +113,7 @@ function AgentCard({
             </div>
           )}
 
-          {showDiff && pending && (
+          {showDiff && hasPending && (
             <div className="mt-2 space-y-2">
               {s.pendingServers && (
                 <div>
@@ -127,6 +131,15 @@ function AgentCard({
                   <DiffView diff={s.pendingInstructions.diff} />
                 </div>
               )}
+              {s.pendingSubagents.map((sa) => (
+                <div key={sa.path}>
+                  <div className="mb-1 font-mono text-[11px] text-zinc-500">
+                    {sa.deleted ? "delete " : ""}
+                    {sa.path}
+                  </div>
+                  <DiffView diff={sa.diff} />
+                </div>
+              ))}
             </div>
           )}
         </>

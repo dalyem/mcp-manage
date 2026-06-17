@@ -58,6 +58,28 @@ export function dirExists(p: string): boolean {
   }
 }
 
+/** Names of the regular files directly inside `dir` ([] if it doesn't exist). */
+export function listFiles(dir: string): string[] {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/** Delete a file if it exists; no-op (and never throws) if it doesn't. */
+export function removeFile(p: string): void {
+  try {
+    fs.rmSync(p, { force: true });
+  } catch {
+    // best-effort: a missing file is success; anything else is surfaced by the
+    // next drift check rather than crashing a sync.
+  }
+}
+
 /**
  * Conservatively strip comments from JSONC so we can parse files like
  * opencode.json that allow `//` and `/* *\/` comments. We only remove

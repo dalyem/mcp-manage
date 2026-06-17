@@ -1,4 +1,20 @@
-import type { AgentKey, NormalizedServer } from "../types";
+import type { AgentKey, NormalizedServer, NormalizedSubagent } from "../types";
+
+/**
+ * Pure transforms between one NormalizedSubagent and one on-disk subagent file.
+ * The engine owns directory listing, IO, deletes and backups; this only knows
+ * the file's name and how to (de)serialize its content.
+ */
+export interface SubagentFormat {
+  /** File name for a subagent of this name (e.g. "<name>.md" / "<name>.toml"). */
+  fileName(name: string): string;
+  /** Recover the subagent name from a directory entry, or null if not ours. */
+  nameFromFile(fileName: string): string | null;
+  /** Serialize one normalized subagent into this agent's file content. */
+  build(sa: NormalizedSubagent): string;
+  /** Parse one file's content (with its derived name) into a normalized subagent. */
+  parse(name: string, content: string): NormalizedSubagent;
+}
 
 /**
  * An adapter knows how to read and write one agent's MCP config file. Adapters
@@ -17,6 +33,10 @@ export interface AgentAdapter {
   binaries: string[];
   /** A directory whose existence also implies the agent is present. */
   configDir: string;
+  /** Directory holding this agent's personal subagents, or null if unsupported. */
+  agentsDir: string | null;
+  /** Pure transforms for one subagent file, or null if unsupported. */
+  subagents: SubagentFormat | null;
 
   /** Parse current config text into normalized servers (import + drift). */
   parseServers(currentContent: string | null): NormalizedServer[];

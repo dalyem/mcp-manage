@@ -2,6 +2,7 @@ import path from "node:path";
 import { HOME } from "../paths";
 import type { NormalizedServer } from "../types";
 import { compact, type AgentAdapter } from "./adapter";
+import { mdSubagentFormat } from "./subagent-format";
 import {
   asStringArray,
   asStringRecord,
@@ -52,6 +53,8 @@ export const claudeAdapter: AgentAdapter = {
   instructionsPath: path.join(HOME, ".claude", "CLAUDE.md"),
   binaries: ["claude"],
   configDir: path.join(HOME, ".claude"),
+  agentsDir: path.join(HOME, ".claude", "agents"),
+  subagents: mdSubagentFormat({ emitName: true, tools: "csv" }),
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, { mcpKey: MCP_KEY, toEntry, fromEntry }),

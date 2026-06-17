@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS subagents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  prompt TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  tools TEXT NOT NULL DEFAULT '[]',
+  color TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS agents (
   key TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
@@ -49,6 +62,18 @@ CREATE TABLE IF NOT EXISTS managed_entries (
   agent_key TEXT NOT NULL,
   server_name TEXT NOT NULL,
   PRIMARY KEY (agent_key, server_name)
+);
+
+CREATE TABLE IF NOT EXISTS subagent_targets (
+  subagent_id INTEGER NOT NULL REFERENCES subagents(id) ON DELETE CASCADE,
+  agent_key TEXT NOT NULL,
+  PRIMARY KEY (subagent_id, agent_key)
+);
+
+CREATE TABLE IF NOT EXISTS managed_subagents (
+  agent_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (agent_key, name)
 );
 
 CREATE TABLE IF NOT EXISTS instructions (

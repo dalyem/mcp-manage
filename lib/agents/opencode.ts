@@ -2,6 +2,7 @@ import path from "node:path";
 import { HOME } from "../paths";
 import type { NormalizedServer } from "../types";
 import { compact, type AgentAdapter } from "./adapter";
+import { mdSubagentFormat } from "./subagent-format";
 import {
   asStringArray,
   asStringRecord,
@@ -56,6 +57,14 @@ export const opencodeAdapter: AgentAdapter = {
   instructionsPath: path.join(HOME, ".config", "opencode", "AGENTS.md"),
   binaries: ["opencode"],
   configDir: path.join(HOME, ".config", "opencode"),
+  // OpenCode derives the agent name from the filename (no `name` field) and
+  // marks subagents with `mode: subagent`; tool perms don't map to an allowlist.
+  agentsDir: path.join(HOME, ".config", "opencode", "agents"),
+  subagents: mdSubagentFormat({
+    emitName: false,
+    tools: "none",
+    extra: { mode: "subagent" },
+  }),
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, {

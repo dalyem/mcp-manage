@@ -6,6 +6,8 @@ import {
   instructions,
   mcpServers,
   serverTargets,
+  subagentTargets,
+  subagents,
 } from "./db/schema";
 import {
   AGENT_KEYS,
@@ -138,6 +140,131 @@ export function setServerEnabled(id: number, enabled: boolean): void {
   db.update(mcpServers)
     .set({ enabled, updatedAt: new Date().toISOString() })
     .where(eq(mcpServers.id, id))
+    .run();
+}
+
+// ---- Subagents ----
+
+export interface SubagentInput {
+  name: string;
+  description?: string;
+  prompt?: string;
+  model?: string;
+  tools?: string[];
+  color?: string;
+  enabled?: boolean;
+  targets?: AgentKey[];
+}
+
+export interface SubagentDTO {
+  id: number;
+  name: string;
+  description: string;
+  prompt: string;
+  model: string;
+  tools: string[];
+  color: string;
+  enabled: boolean;
+  targets: AgentKey[];
+}
+
+export function validateSubagentInput(input: SubagentInput): string | null {
+  if (!input.name || !/^[a-z0-9][a-z0-9-]*$/.test(input.name)) {
+    return "name is required and must be lowercase letters, numbers and dashes (e.g. code-reviewer)";
+  }
+  if (!input.description || input.description.trim() === "") {
+    return "description is required (it tells the agent when to use this subagent)";
+  }
+  if (!input.prompt || input.prompt.trim() === "") {
+    return "system prompt is required";
+  }
+  if (input.targets) {
+    for (const t of input.targets) {
+      if (!AGENT_KEYS.includes(t)) return `unknown target agent: ${t}`;
+    }
+  }
+  return null;
+}
+
+function normalizeSubagentInput(input: SubagentInput) {
+  return {
+    name: input.name.trim(),
+    description: input.description?.trim() ?? "",
+    prompt: input.prompt ?? "",
+    model: input.model?.trim() ?? "",
+    tools: input.tools ?? [],
+    color: input.color?.trim() ?? "",
+    enabled: input.enabled ?? true,
+  };
+}
+
+export function listSubagents(): SubagentDTO[] {
+  const rows = db.select().from(subagents).all();
+  const targetRows = db.select().from(subagentTargets).all();
+  const byId = new Map<number, AgentKey[]>();
+  for (const t of targetRows) {
+    const list = byId.get(t.subagentId) ?? [];
+    list.push(t.agentKey as AgentKey);
+    byId.set(t.subagentId, list);
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    prompt: r.prompt,
+    model: r.model,
+    tools: r.tools ?? [],
+    color: r.color,
+    enabled: r.enabled,
+    targets: byId.get(r.id) ?? [...AGENT_KEYS],
+  }));
+}
+
+export function getSubagent(id: number): SubagentDTO | null {
+  return listSubagents().find((s) => s.id === id) ?? null;
+}
+
+function applySubagentTargets(
+  subagentId: number,
+  targets: AgentKey[] | undefined,
+) {
+  const list = targets ?? [...AGENT_KEYS];
+  db.delete(subagentTargets)
+    .where(eq(subagentTargets.subagentId, subagentId))
+    .run();
+  for (const agentKey of list) {
+    db.insert(subagentTargets).values({ subagentId, agentKey }).run();
+  }
+}
+
+export function createSubagent(input: SubagentInput): number {
+  const v = normalizeSubagentInput(input);
+  const res = db.insert(subagents).values(v).run();
+  const id = Number(res.lastInsertRowid);
+  applySubagentTargets(id, input.targets);
+  return id;
+}
+
+export function updateSubagent(id: number, input: SubagentInput): void {
+  const v = normalizeSubagentInput(input);
+  db.update(subagents)
+    .set({ ...v, updatedAt: new Date().toISOString() })
+    .where(eq(subagents.id, id))
+    .run();
+  applySubagentTargets(id, input.targets);
+}
+
+export function deleteSubagent(id: number): void {
+  // subagent_targets cascade; managed_subagents are cleaned up by the next sync
+  // (the deleted subagent drops out of "desired", so owned-set cleanup removes
+  // its files from each agent dir). We leave managed_subagents intact for that.
+  db.delete(subagents).where(eq(subagents.id, id)).run();
+}
+
+export function setSubagentEnabled(id: number, enabled: boolean): void {
+  db.update(subagents)
+    .set({ enabled, updatedAt: new Date().toISOString() })
+    .where(eq(subagents.id, id))
     .run();
 }
 
