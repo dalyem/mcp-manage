@@ -263,15 +263,19 @@ export function SubagentsPanel({
 }) {
   const [form, setForm] = useState<FormState | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function toggleEnabled(s: SubagentDTO) {
     setBusyId(s.id);
+    setError(null);
     try {
       await sendJSON(`/api/subagents/${s.id}`, "PUT", {
         enabledOnly: true,
         enabled: !s.enabled,
       });
       onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyId(null);
     }
@@ -280,9 +284,12 @@ export function SubagentsPanel({
   async function remove(s: SubagentDTO) {
     if (!confirm(`Delete "${s.name}" and remove it from all agents?`)) return;
     setBusyId(s.id);
+    setError(null);
     try {
       await sendJSON(`/api/subagents/${s.id}`, "DELETE");
       onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyId(null);
     }
@@ -296,6 +303,12 @@ export function SubagentsPanel({
           + Add subagent
         </Button>
       </div>
+
+      {error && (
+        <div className="mb-3 rounded-md bg-red-50 p-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+          {error}
+        </div>
+      )}
 
       {subagents.length === 0 ? (
         <p className="py-6 text-center text-sm text-zinc-500">

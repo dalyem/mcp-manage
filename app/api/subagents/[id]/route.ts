@@ -52,6 +52,8 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   const id = Number(idStr);
   if (!Number.isInteger(id))
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
+  if (!getSubagent(id))
+    return NextResponse.json({ error: "not found" }, { status: 404 });
 
   try {
     deleteSubagent(id);

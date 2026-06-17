@@ -29,6 +29,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
+  // req.json() happily returns null / primitives / arrays for valid JSON; reject
+  // them up front so validateSubagentInput only ever sees an object.
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return NextResponse.json(
+      { error: "request body must be a JSON object" },
+      { status: 400 },
+    );
+  }
+
   const err = validateSubagentInput(input);
   if (err) return NextResponse.json({ error: err }, { status: 400 });
 
