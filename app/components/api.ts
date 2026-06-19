@@ -10,6 +10,8 @@ import type {
   SubagentInput,
 } from "@/lib/data";
 import type { SyncResult } from "@/lib/types";
+import type { GitHubConfigPublic } from "@/lib/github/config";
+import type { RestorePlan } from "@/lib/github/restore";
 
 export type {
   AgentStatus,
@@ -22,6 +24,8 @@ export type {
   SubagentDTO,
   SubagentInput,
   SyncResult,
+  GitHubConfigPublic,
+  RestorePlan,
 };
 
 async function handle<T>(r: Response): Promise<T> {

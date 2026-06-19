@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getInstructions, setInstructions } from "@/lib/data";
 import { syncAll } from "@/lib/sync/engine";
+import { maybeAutoBackup } from "@/lib/github/backup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export async function PUT(req: Request) {
   try {
     setInstructions(body.content ?? "");
     const results = syncAll();
+    maybeAutoBackup();
     return NextResponse.json({ results });
   } catch (e) {
     return NextResponse.json(

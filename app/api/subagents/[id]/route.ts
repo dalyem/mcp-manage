@@ -8,6 +8,7 @@ import {
   type SubagentInput,
 } from "@/lib/data";
 import { syncAll } from "@/lib/sync/engine";
+import { maybeAutoBackup } from "@/lib/github/backup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function PUT(req: Request, { params }: Ctx) {
       updateSubagent(id, body);
     }
     const results = syncAll();
+    maybeAutoBackup();
     return NextResponse.json({ id, results });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -59,6 +61,7 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     deleteSubagent(id);
     // owned-set cleanup runs here: the removed subagent drops out of "desired".
     const results = syncAll();
+    maybeAutoBackup();
     return NextResponse.json({ id, results });
   } catch (e) {
     return NextResponse.json(

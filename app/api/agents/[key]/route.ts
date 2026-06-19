@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { setAgentManage } from "@/lib/data";
 import { syncAll } from "@/lib/sync/engine";
+import { maybeAutoBackup } from "@/lib/github/backup";
 import { AGENT_KEYS, type AgentKey } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -23,6 +24,7 @@ export async function PUT(req: Request, { params }: Ctx) {
   try {
     setAgentManage(key as AgentKey, body.manageEnabled ?? true);
     const results = syncAll();
+    maybeAutoBackup();
     return NextResponse.json({ key, results });
   } catch (e) {
     return NextResponse.json(
