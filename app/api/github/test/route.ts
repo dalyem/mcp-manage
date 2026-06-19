@@ -15,9 +15,11 @@ interface TestBody {
 export async function POST(req: Request) {
   let body: TestBody = {};
   try {
-    body = await req.json();
+    const parsed = await req.json();
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      body = parsed as TestBody;
   } catch {
-    // empty body is fine — test the stored config
+    // empty/invalid body is fine — test the stored config
   }
 
   const stored = getGitHubConfig();

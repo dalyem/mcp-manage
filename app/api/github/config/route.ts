@@ -38,8 +38,20 @@ export async function PUT(req: Request) {
     );
   }
 
-  const owner = (body.owner ?? "").trim();
-  const repo = (body.repo ?? "").trim();
+  if (typeof body.owner !== "string" || typeof body.repo !== "string")
+    return NextResponse.json({ error: "owner and repo must be strings" }, { status: 400 });
+  if (body.branch != null && typeof body.branch !== "string")
+    return NextResponse.json({ error: "branch must be a string" }, { status: 400 });
+  if (body.pathPrefix != null && typeof body.pathPrefix !== "string")
+    return NextResponse.json({ error: "pathPrefix must be a string" }, { status: 400 });
+  if (body.token != null && typeof body.token !== "string")
+    return NextResponse.json({ error: "token must be a string" }, { status: 400 });
+  if (body.autoBackup != null && typeof body.autoBackup !== "boolean")
+    return NextResponse.json({ error: "autoBackup must be a boolean" }, { status: 400 });
+
+  const owner = body.owner.trim();
+  const repo = body.repo.trim();
+  const token = (body.token ?? "").trim();
   if (!owner || !repo)
     return NextResponse.json({ error: "owner and repo are required" }, { status: 400 });
   if (/[\s/]/.test(owner) || /[\s/]/.test(repo))
@@ -55,8 +67,8 @@ export async function PUT(req: Request) {
       branch: body.branch?.trim() || "main",
       pathPrefix: body.pathPrefix ?? "",
       autoBackup: !!body.autoBackup,
-      // An empty/omitted token preserves the stored one (see saveGitHubConfig).
-      ...(body.token ? { token: body.token } : {}),
+      // An empty/whitespace/omitted token preserves the stored one.
+      ...(token ? { token } : {}),
     });
     return NextResponse.json({ config: getGitHubConfigPublic() });
   } catch (e) {

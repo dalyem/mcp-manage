@@ -57,11 +57,20 @@ async function runScheduled(): Promise<void> {
  * after every sync — bursts coalesce into a single commit.
  */
 export function maybeAutoBackup(): void {
-  const cfg = getGitHubConfig();
-  if (!isConfigured(cfg) || !cfg.autoBackup) return;
-  pending = true;
-  if (timer) return;
-  timer = setTimeout(runScheduled, DEBOUNCE_MS);
-  // Don't keep the event loop alive solely for a pending backup.
-  (timer as unknown as { unref?: () => void }).unref?.();
+  // Best-effort: scheduling a backup must never turn a successful mutation into
+  // a 500, so this never throws to its callers (the route handlers).
+  try {
+    const cfg = getGitHubConfig();
+    if (!isConfigured(cfg) || !cfg.autoBackup) return;
+    pending = true;
+    if (timer) return;
+    timer = setTimeout(runScheduled, DEBOUNCE_MS);
+    // Don't keep the event loop alive solely for a pending backup.
+    (timer as unknown as { unref?: () => void }).unref?.();
+  } catch (e) {
+    console.error(
+      "[mcp-manage] auto-backup scheduling failed:",
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
