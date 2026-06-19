@@ -10,6 +10,17 @@ export const AGENT_KEYS = [
 
 export type AgentKey = (typeof AGENT_KEYS)[number];
 
+/**
+ * Agents that support the SKILL.md Agent Skills standard. Every agent except
+ * Gemini CLI (which has no skill concept). Must match the adapters whose
+ * `skillsDir` is non-null.
+ */
+export const SKILL_AGENT_KEYS = AGENT_KEYS.filter(
+  (k) => k !== "gemini",
+) as Exclude<AgentKey, "gemini">[];
+
+export type SkillAgentKey = (typeof SKILL_AGENT_KEYS)[number];
+
 export type Transport = "stdio" | "http" | "sse";
 
 /**
@@ -51,8 +62,40 @@ export interface NormalizedSubagent {
   color: string;
 }
 
+/**
+ * One bundled file that travels alongside SKILL.md inside a skill directory.
+ * `path` is POSIX-style and relative to the skill dir (e.g. "scripts/run.py");
+ * binary files are carried base64-encoded.
+ */
+export interface SkillFile {
+  path: string;
+  content: string;
+  encoding: "utf8" | "base64";
+}
+
+/**
+ * The normalized, agent-agnostic representation of an Agent Skill. Unlike a
+ * subagent (one file), a skill is a DIRECTORY: a generated SKILL.md (frontmatter
+ * + the `instructions` body) plus any bundled `files`. The SKILL.md format is
+ * shared across every skills-capable agent, so there is no per-agent skill
+ * format — only a per-agent skills directory (AgentAdapter.skillsDir).
+ */
+export interface NormalizedSkill {
+  name: string;
+  /** when the agent should load this skill (SKILL.md `description`) */
+  description: string;
+  /** the SKILL.md markdown body (the instructions) */
+  instructions: string;
+  /** optional frontmatter `allowed-tools`; [] = omit */
+  allowedTools: string[];
+  /** optional passthrough frontmatter `metadata`; {} = omit */
+  metadata: Record<string, string>;
+  /** bundled files beside SKILL.md */
+  files: SkillFile[];
+}
+
 export type SyncStatus = "ok" | "skipped" | "error";
-export type SyncKind = "servers" | "instructions" | "subagents";
+export type SyncKind = "servers" | "instructions" | "subagents" | "skills";
 
 export interface SyncResult {
   agentKey: AgentKey;

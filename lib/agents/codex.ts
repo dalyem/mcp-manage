@@ -58,6 +58,7 @@ export const codexAdapter: AgentAdapter = {
   configDir: path.join(HOME, ".codex"),
   agentsDir: path.join(HOME, ".codex", "agents"),
   subagents: tomlSubagentFormat(),
+  skillsDir: path.join(HOME, ".codex", "skills"),
   parseServers(content) {
     const root = parseRoot(content);
     const servers = root[MCP_KEY];

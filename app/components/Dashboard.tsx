@@ -6,6 +6,7 @@ import type {
   AgentStatus,
   BackupDTO,
   ServerDTO,
+  SkillDTO,
   StatusResponse,
   SubagentDTO,
   SyncResponse,
@@ -15,6 +16,7 @@ import { Badge, Button, Dot } from "./ui";
 import { StatusPanel } from "./StatusPanel";
 import { ServersPanel } from "./ServersPanel";
 import { SubagentsPanel } from "./SubagentsPanel";
+import { SkillsPanel } from "./SkillsPanel";
 import { InstructionsPanel } from "./InstructionsPanel";
 import { BackupsPanel } from "./BackupsPanel";
 
@@ -41,6 +43,7 @@ export function Dashboard() {
   const [agents, setAgents] = useState<AgentMeta[]>([]);
   const [servers, setServers] = useState<ServerDTO[]>([]);
   const [subagents, setSubagents] = useState<SubagentDTO[]>([]);
+  const [skills, setSkills] = useState<SkillDTO[]>([]);
   const [instructions, setInstructions] = useState("");
   const [backups, setBackups] = useState<BackupDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,10 +53,11 @@ export function Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [st, sv, sa, instr, bk] = await Promise.all([
+      const [st, sv, sa, sk, instr, bk] = await Promise.all([
         getJSON<StatusResponse>("/api/status"),
         getJSON<{ servers: ServerDTO[] }>("/api/servers"),
         getJSON<{ subagents: SubagentDTO[] }>("/api/subagents"),
+        getJSON<{ skills: SkillDTO[] }>("/api/skills"),
         getJSON<{ content: string }>("/api/instructions"),
         getJSON<{ backups: BackupDTO[] }>("/api/backups"),
       ]);
@@ -61,6 +65,7 @@ export function Dashboard() {
       setAgents(st.agents);
       setServers(sv.servers);
       setSubagents(sa.subagents);
+      setSkills(sk.skills);
       setInstructions(instr.content);
       setBackups(bk.backups);
       setError(null);
@@ -177,6 +182,7 @@ export function Dashboard() {
 
           <ServersPanel servers={servers} onChanged={onChanged} />
           <SubagentsPanel subagents={subagents} onChanged={onChanged} />
+          <SkillsPanel skills={skills} onChanged={onChanged} />
           <InstructionsPanel content={instructions} onSaved={onChanged} />
           <BackupsPanel backups={backups} onRestored={onChanged} />
         </div>

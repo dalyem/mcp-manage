@@ -76,6 +76,39 @@ CREATE TABLE IF NOT EXISTS managed_subagents (
   PRIMARY KEY (agent_key, name)
 );
 
+CREATE TABLE IF NOT EXISTS skills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL DEFAULT '',
+  allowed_tools TEXT NOT NULL DEFAULT '[]',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS skill_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  encoding TEXT NOT NULL DEFAULT 'utf8',
+  UNIQUE (skill_id, path)
+);
+
+CREATE TABLE IF NOT EXISTS skill_targets (
+  skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  agent_key TEXT NOT NULL,
+  PRIMARY KEY (skill_id, agent_key)
+);
+
+CREATE TABLE IF NOT EXISTS managed_skills (
+  agent_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (agent_key, name)
+);
+
 CREATE TABLE IF NOT EXISTS instructions (
   scope TEXT PRIMARY KEY DEFAULT 'global',
   content TEXT NOT NULL DEFAULT '',
@@ -98,7 +131,8 @@ CREATE TABLE IF NOT EXISTS backups (
   agent_key TEXT NOT NULL,
   original_path TEXT NOT NULL,
   content TEXT,
-  backup_path TEXT NOT NULL
+  backup_path TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'file'
 );
 
 CREATE TABLE IF NOT EXISTS app_meta (
@@ -111,6 +145,20 @@ function bootstrap(sqlite: Database.Database): void {
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.exec(BOOTSTRAP_SQL);
+
+  // Additive column migrations for DBs created before the column existed.
+  // CREATE TABLE IF NOT EXISTS never alters an existing table, so add new
+  // columns idempotently here (SQLite throws if the column already exists —
+  // that's the "already migrated" case, so swallow it).
+  for (const ddl of [
+    "ALTER TABLE backups ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'",
+  ]) {
+    try {
+      sqlite.exec(ddl);
+    } catch {
+      // column already present
+    }
+  }
 
   // Seed the global instructions row and the five agents (idempotent).
   sqlite

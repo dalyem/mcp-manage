@@ -55,6 +55,7 @@ export const claudeAdapter: AgentAdapter = {
   configDir: path.join(HOME, ".claude"),
   agentsDir: path.join(HOME, ".claude", "agents"),
   subagents: mdSubagentFormat({ emitName: true, tools: "csv" }),
+  skillsDir: path.join(HOME, ".claude", "skills"),
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, { mcpKey: MCP_KEY, toEntry, fromEntry }),

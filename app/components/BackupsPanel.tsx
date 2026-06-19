@@ -60,6 +60,14 @@ export function BackupsPanel({
                   <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">
                     {b.agentKey}
                   </span>
+                  {b.kind === "dir" && (
+                    <span
+                      className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                      title="skill directory snapshot"
+                    >
+                      dir
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
                     {b.originalPath}
                   </span>

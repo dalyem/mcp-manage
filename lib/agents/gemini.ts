@@ -53,6 +53,7 @@ export const geminiAdapter: AgentAdapter = {
   configDir: path.join(HOME, ".gemini"),
   agentsDir: path.join(HOME, ".gemini", "agents"),
   subagents: mdSubagentFormat({ emitName: true, tools: "array" }),
+  skillsDir: null, // Gemini CLI has no Agent Skills concept (commands only)
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, { mcpKey: MCP_KEY, toEntry, fromEntry }),
