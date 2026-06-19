@@ -37,6 +37,13 @@ export interface AgentAdapter {
   agentsDir: string | null;
   /** Pure transforms for one subagent file, or null if unsupported. */
   subagents: SubagentFormat | null;
+  /**
+   * Directory holding this agent's personal Agent Skills, or null if the agent
+   * has no skill concept (Gemini). The SKILL.md format is identical across all
+   * skills-capable agents, so only this location differs per agent — no
+   * per-agent skill format is needed.
+   */
+  skillsDir: string | null;
 
   /** Parse current config text into normalized servers (import + drift). */
   parseServers(currentContent: string | null): NormalizedServer[];

@@ -4,6 +4,8 @@ import type {
   BackupDTO,
   ServerDTO,
   ServerInput,
+  SkillDTO,
+  SkillInput,
   SubagentDTO,
   SubagentInput,
 } from "@/lib/data";
@@ -17,6 +19,8 @@ export type {
   BackupDTO,
   ServerDTO,
   ServerInput,
+  SkillDTO,
+  SkillInput,
   SubagentDTO,
   SubagentInput,
   SyncResult,

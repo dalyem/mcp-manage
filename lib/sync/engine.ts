@@ -6,14 +6,18 @@ import {
   agents,
   instructions,
   managedEntries,
+  managedSkills,
   managedSubagents,
   mcpServers,
   serverTargets,
+  skillFiles,
+  skillTargets,
+  skills,
   subagentTargets,
   subagents,
   syncLog,
 } from "../db/schema";
-import { backupFile } from "../backup/backup";
+import { backupFile, backupSkillDir } from "../backup/backup";
 import {
   isWritable,
   parseJsonc,
@@ -21,8 +25,13 @@ import {
   writeText,
   fileExists,
   removeFile,
+  listFilesRecursive,
+  readBytes,
+  removeEmptyDirs,
+  writeBytes,
 } from "../fs-utils";
 import { dirExists } from "../fs-utils";
+import { buildSkillMd, SKILL_FILE } from "../agents/skill-format";
 import {
   ADAPTER_LIST,
   anyBinaryOnPath,
@@ -37,7 +46,9 @@ import {
   type FileChange,
   type HealthLevel,
   type NormalizedServer,
+  type NormalizedSkill,
   type NormalizedSubagent,
+  SKILL_AGENT_KEYS,
   type SyncKind,
   type SyncResult,
   type SyncStatus,
@@ -59,12 +70,21 @@ interface SubagentState {
   normalized: NormalizedSubagent;
 }
 
+interface SkillState {
+  id: number;
+  enabled: boolean;
+  targets: AgentKey[];
+  normalized: NormalizedSkill;
+}
+
 interface SyncState {
   servers: ServerState[];
   subagents: SubagentState[];
+  skills: SkillState[];
   instructionsContent: string;
   managed: Map<AgentKey, string[]>;
   managedSubagents: Map<AgentKey, string[]>;
+  managedSkills: Map<AgentKey, string[]>;
   manageEnabled: Map<AgentKey, boolean>;
 }
 
@@ -90,6 +110,20 @@ function rowToNormalizedSubagent(
     model: r.model,
     tools: r.tools ?? [],
     color: r.color,
+  };
+}
+
+function rowToNormalizedSkill(
+  r: typeof skills.$inferSelect,
+  files: NormalizedSkill["files"],
+): NormalizedSkill {
+  return {
+    name: r.name,
+    description: r.description,
+    instructions: r.instructions,
+    allowedTools: r.allowedTools ?? [],
+    metadata: r.metadata ?? {},
+    files,
   };
 }
 
@@ -144,6 +178,34 @@ export function loadState(): SyncState {
     managedSubs.get(m.agentKey as AgentKey)?.push(m.name);
   }
 
+  const skillRows = db.select().from(skills).all();
+  const skillFileRows = db.select().from(skillFiles).all();
+  const skillFilesById = new Map<number, NormalizedSkill["files"]>();
+  for (const f of skillFileRows) {
+    const list = skillFilesById.get(f.skillId) ?? [];
+    list.push({ path: f.path, content: f.content, encoding: f.encoding });
+    skillFilesById.set(f.skillId, list);
+  }
+  const skillTargetRows = db.select().from(skillTargets).all();
+  const skillTargetsById = new Map<number, AgentKey[]>();
+  for (const t of skillTargetRows) {
+    const list = skillTargetsById.get(t.skillId) ?? [];
+    list.push(t.agentKey as AgentKey);
+    skillTargetsById.set(t.skillId, list);
+  }
+  const skillStates: SkillState[] = skillRows.map((r) => ({
+    id: r.id,
+    enabled: r.enabled,
+    targets: skillTargetsById.get(r.id) ?? [...SKILL_AGENT_KEYS],
+    normalized: rowToNormalizedSkill(r, skillFilesById.get(r.id) ?? []),
+  }));
+
+  const managedSkillsMap = new Map<AgentKey, string[]>();
+  for (const k of AGENT_KEYS) managedSkillsMap.set(k, []);
+  for (const m of db.select().from(managedSkills).all()) {
+    managedSkillsMap.get(m.agentKey as AgentKey)?.push(m.name);
+  }
+
   const manageEnabled = new Map<AgentKey, boolean>();
   for (const a of db.select().from(agents).all()) {
     manageEnabled.set(a.key as AgentKey, a.manageEnabled);
@@ -152,9 +214,11 @@ export function loadState(): SyncState {
   return {
     servers,
     subagents: subagentStates,
+    skills: skillStates,
     instructionsContent: instrRow?.content ?? "",
     managed,
     managedSubagents: managedSubs,
+    managedSkills: managedSkillsMap,
     manageEnabled,
   };
 }
@@ -231,6 +295,181 @@ function computeSubagentChanges(
   return changes;
 }
 
+function desiredSkillsFor(
+  agentKey: AgentKey,
+  state: SyncState,
+): NormalizedSkill[] {
+  return state.skills
+    .filter((s) => s.enabled && s.targets.includes(agentKey))
+    .map((s) => s.normalized);
+}
+
+interface DesiredFile {
+  content: string;
+  encoding: "utf8" | "base64";
+}
+
+/** The full desired file tree for one skill: SKILL.md plus its bundled files. */
+function desiredSkillTree(skill: NormalizedSkill): Map<string, DesiredFile> {
+  const tree = new Map<string, DesiredFile>();
+  tree.set(SKILL_FILE, { content: buildSkillMd(skill), encoding: "utf8" });
+  for (const f of skill.files) {
+    tree.set(f.path, { content: f.content, encoding: f.encoding });
+  }
+  return tree;
+}
+
+interface SkillFileOp {
+  relPath: string;
+  absPath: string;
+  kind: "write" | "delete";
+  encoding: "utf8" | "base64";
+  /** desired content to write (utf8 text or base64); "" for a delete. */
+  content: string;
+  /** before/after text for diffing (utf8 only; null for binary or absent). */
+  before: string | null;
+  after: string | null;
+  changed: boolean;
+}
+
+interface SkillChange {
+  name: string;
+  /** the skill directory: <skillsDir>/<name>. */
+  dir: string;
+  ops: SkillFileOp[];
+  /** the whole skill was deleted / disabled / un-targeted. */
+  removeDir: boolean;
+  changed: boolean;
+}
+
+/** Absolute path for a POSIX-relative file path under a skill directory. */
+function skillFileAbs(dir: string, relPath: string): string {
+  return path.join(dir, ...relPath.split("/"));
+}
+
+/**
+ * Per-directory plan for one agent's skills. For each desired skill, mirror its
+ * file tree under <skillsDir>/<name> (write SKILL.md + bundled files, delete any
+ * stale file we previously owned in that tree). For each owned skill no longer
+ * desired, remove its whole directory. Pure — only reads from disk.
+ */
+function computeSkillChanges(
+  adapter: AgentAdapter,
+  desired: NormalizedSkill[],
+  owned: string[],
+): SkillChange[] {
+  const skillsDir = adapter.skillsDir;
+  if (!skillsDir) return [];
+
+  const changes: SkillChange[] = [];
+  const desiredNames = new Set(desired.map((d) => d.name));
+  const ownedNames = new Set(owned);
+
+  for (const skill of desired) {
+    const dir = path.join(skillsDir, skill.name);
+    const tree = desiredSkillTree(skill);
+    const ops: SkillFileOp[] = [];
+
+    for (const [relPath, want] of tree) {
+      const absPath = skillFileAbs(dir, relPath);
+      if (want.encoding === "utf8") {
+        const before = readText(absPath);
+        ops.push({
+          relPath,
+          absPath,
+          kind: "write",
+          encoding: "utf8",
+          content: want.content,
+          before,
+          after: want.content,
+          changed: want.content !== before,
+        });
+      } else {
+        const desiredBytes = Buffer.from(want.content, "base64");
+        const beforeBytes = readBytes(absPath);
+        ops.push({
+          relPath,
+          absPath,
+          kind: "write",
+          encoding: "base64",
+          content: want.content,
+          before: null,
+          after: null,
+          changed: !beforeBytes || !beforeBytes.equals(desiredBytes),
+        });
+      }
+    }
+
+    // Prune stale files only under skill dirs we already own — never on a
+    // skill's first sync. The owned-set is recorded only AFTER a successful
+    // sync, so a brand-new skill is absent here on its first pass; pruning it
+    // would delete a pre-existing user directory's files on name collision.
+    if (ownedNames.has(skill.name)) {
+      for (const relPath of listFilesRecursive(dir)) {
+        if (tree.has(relPath)) continue;
+        const absPath = skillFileAbs(dir, relPath);
+        ops.push({
+          relPath,
+          absPath,
+          kind: "delete",
+          encoding: "utf8",
+          content: "",
+          before: readText(absPath),
+          after: null,
+          changed: true,
+        });
+      }
+    }
+
+    changes.push({
+      name: skill.name,
+      dir,
+      ops,
+      removeDir: false,
+      changed: ops.some((o) => o.changed),
+    });
+  }
+
+  // Owned skills no longer desired (deleted / disabled / un-targeted) => remove.
+  for (const name of owned) {
+    if (desiredNames.has(name)) continue;
+    const dir = path.join(skillsDir, name);
+    const ops: SkillFileOp[] = listFilesRecursive(dir).map((relPath) => ({
+      relPath,
+      absPath: skillFileAbs(dir, relPath),
+      kind: "delete" as const,
+      encoding: "utf8" as const,
+      content: "",
+      before: readText(skillFileAbs(dir, relPath)),
+      after: null,
+      changed: true,
+    }));
+    if (ops.length > 0) {
+      changes.push({ name, dir, ops, removeDir: true, changed: true });
+    }
+  }
+
+  return changes;
+}
+
+/** Render a multi-file skill change as a labeled, concatenated diff. */
+function skillDiff(change: SkillChange): string {
+  const blocks: string[] = [];
+  for (const op of change.ops) {
+    if (!op.changed) continue;
+    if (op.encoding === "base64") {
+      blocks.push(
+        `${op.relPath}\n${
+          op.kind === "delete" ? "- (binary file removed)" : "+ (binary file)"
+        }`,
+      );
+    } else {
+      blocks.push(`${op.relPath}\n${lineDiff(op.before ?? "", op.after ?? "")}`);
+    }
+  }
+  return blocks.join("\n\n");
+}
+
 function configParsesOk(adapter: AgentAdapter, content: string | null): boolean {
   if (content == null || content.trim() === "") return true;
   if (adapter.key === "codex") {
@@ -294,6 +533,7 @@ export interface AgentInspection {
   serverChange: FileChange;
   instrChange: FileChange | null;
   subagentChanges: SubagentFileChange[];
+  skillChanges: SkillChange[];
 }
 
 /** Read-only: compute changes once and derive health from them. */
@@ -322,14 +562,20 @@ function inspectAgent(adapter: AgentAdapter, state: SyncState): AgentInspection 
     desiredSubagentsFor(key, state),
     state.managedSubagents.get(key) ?? [],
   );
+  const skillChanges = computeSkillChanges(
+    adapter,
+    desiredSkillsFor(key, state),
+    state.managedSkills.get(key) ?? [],
+  );
 
   let drift: DriftState = "unknown";
   if (present && configParses) {
     const driftedServers = serverChange.changed && !serverChange.error;
     const driftedInstr = !!instrChange?.changed;
     const driftedSubagents = subagentChanges.some((c) => c.changed);
+    const driftedSkills = skillChanges.some((c) => c.changed);
     drift =
-      driftedServers || driftedInstr || driftedSubagents
+      driftedServers || driftedInstr || driftedSubagents || driftedSkills
         ? "drifted"
         : "in-sync";
   }
@@ -397,6 +643,7 @@ function inspectAgent(adapter: AgentAdapter, state: SyncState): AgentInspection 
     serverChange,
     instrChange,
     subagentChanges,
+    skillChanges,
   };
 }
 
@@ -416,6 +663,15 @@ function setManagedSubagents(agentKey: AgentKey, names: string[]): void {
       .run();
     for (const name of names) {
       tx.insert(managedSubagents).values({ agentKey, name }).run();
+    }
+  });
+}
+
+function setManagedSkills(agentKey: AgentKey, names: string[]): void {
+  db.transaction((tx) => {
+    tx.delete(managedSkills).where(eq(managedSkills.agentKey, agentKey)).run();
+    for (const name of names) {
+      tx.insert(managedSkills).values({ agentKey, name }).run();
     }
   });
 }
@@ -573,6 +829,61 @@ export function syncAll(opts: SyncOptions = {}): SyncResult[] {
         desiredSubagentsFor(key, state).map((d) => d.name),
       );
     }
+
+    // --- skills ---
+    // Captured into a local so the non-null narrowing survives the IO calls
+    // below (TS drops property narrowing across function calls).
+    const skillsDir = adapter.skillsDir;
+    if (skillsDir) {
+      for (const skc of ins.skillChanges) {
+        if (!skc.changed) continue;
+        const diff = skillDiff(skc);
+        let backupPath: string | undefined;
+        if (!dryRun) {
+          // Back up the whole skill dir before any write/delete touches it.
+          backupPath = backupSkillDir(key, skc.dir) ?? undefined;
+          for (const op of skc.ops) {
+            if (!op.changed) continue;
+            if (op.kind === "delete") {
+              removeFile(op.absPath);
+              // Prune the file's now-empty parent dirs up to (not incl.) the
+              // skills root — cleans emptied subdirs and the whole skill dir.
+              removeEmptyDirs(path.dirname(op.absPath), skillsDir);
+            } else if (op.encoding === "base64") {
+              writeBytes(op.absPath, Buffer.from(op.content, "base64"));
+            } else {
+              writeText(op.absPath, op.content);
+            }
+          }
+          logSync(
+            key,
+            "skills",
+            "ok",
+            `${skc.removeDir ? "removed" : "updated"} ${skc.name}`,
+            diff,
+          );
+        }
+        results.push({
+          agentKey: key,
+          kind: "skills",
+          status: "ok",
+          changed: true,
+          message: `${dryRun ? "would " : ""}${
+            skc.removeDir ? "remove" : "update"
+          } ${skc.name}`,
+          diff,
+          backupPath,
+          path: skc.dir,
+        });
+      }
+      // After syncing, the owned-set reflects the current desired skill names.
+      if (!dryRun) {
+        setManagedSkills(
+          key,
+          desiredSkillsFor(key, state).map((d) => d.name),
+        );
+      }
+    }
   }
 
   return results;
@@ -584,6 +895,12 @@ export interface AgentStatus extends AgentHealth {
   pendingSubagents: {
     name: string;
     path: string;
+    diff: string;
+    deleted: boolean;
+  }[];
+  pendingSkills: {
+    name: string;
+    dir: string;
     diff: string;
     deleted: boolean;
   }[];
@@ -616,6 +933,14 @@ export function getStatus(): AgentStatus[] {
           path: c.path,
           diff: lineDiff(c.before, c.after ?? ""),
           deleted: c.after === null,
+        })),
+      pendingSkills: ins.skillChanges
+        .filter((c) => c.changed)
+        .map((c) => ({
+          name: c.name,
+          dir: c.dir,
+          diff: skillDiff(c),
+          deleted: c.removeDir,
         })),
     };
   });

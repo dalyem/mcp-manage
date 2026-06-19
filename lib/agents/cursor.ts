@@ -48,6 +48,7 @@ export const cursorAdapter: AgentAdapter = {
   agentsDir: path.join(HOME, ".cursor", "agents"),
   // Cursor frontmatter omits a tools allowlist (it uses readonly/is_background).
   subagents: mdSubagentFormat({ emitName: true, tools: "none" }),
+  skillsDir: path.join(HOME, ".cursor", "skills"),
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, { mcpKey: MCP_KEY, toEntry, fromEntry }),

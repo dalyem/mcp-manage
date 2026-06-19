@@ -4,6 +4,7 @@ import {
   primaryKey,
   sqliteTable,
   text,
+  unique,
 } from "drizzle-orm/sqlite-core";
 import type { Transport } from "../types";
 
@@ -99,6 +100,69 @@ export const managedSubagents = sqliteTable(
   (t) => [primaryKey({ columns: [t.agentKey, t.name] })],
 );
 
+export const skills = sqliteTable("skills", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  instructions: text("instructions").notNull().default(""),
+  allowedTools: text("allowed_tools", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  metadata: text("metadata", { mode: "json" })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+/** Bundled files that live beside SKILL.md inside a skill directory. */
+export const skillFiles = sqliteTable(
+  "skill_files",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    skillId: integer("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: text("content").notNull().default(""),
+    encoding: text("encoding")
+      .$type<"utf8" | "base64">()
+      .notNull()
+      .default("utf8"),
+  },
+  // id is the PK (FK convenience); paths are unique within one skill.
+  (t) => [unique().on(t.skillId, t.path)],
+);
+
+/** Which agents each skill should be written to (empty => all supported). */
+export const skillTargets = sqliteTable(
+  "skill_targets",
+  {
+    skillId: integer("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    agentKey: text("agent_key").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.skillId, t.agentKey] })],
+);
+
+/** The "owned set": skill dirs this tool last wrote into each agent's dir. */
+export const managedSkills = sqliteTable(
+  "managed_skills",
+  {
+    agentKey: text("agent_key").notNull(),
+    name: text("name").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.agentKey, t.name] })],
+);
+
 export const instructions = sqliteTable("instructions", {
   scope: text("scope").primaryKey().default("global"),
   content: text("content").notNull().default(""),
@@ -126,8 +190,11 @@ export const backups = sqliteTable("backups", {
     .default(sql`(datetime('now'))`),
   agentKey: text("agent_key").notNull(),
   originalPath: text("original_path").notNull(),
+  /** Single-file backups store the file's text here; dir backups leave it null. */
   content: text("content"),
+  /** A .bak file (kind="file") or a backup directory tree root (kind="dir"). */
   backupPath: text("backup_path").notNull(),
+  kind: text("kind").$type<"file" | "dir">().notNull().default("file"),
 });
 
 export const appMeta = sqliteTable("app_meta", {

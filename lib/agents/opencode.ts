@@ -65,6 +65,7 @@ export const opencodeAdapter: AgentAdapter = {
     tools: "none",
     extra: { mode: "subagent" },
   }),
+  skillsDir: path.join(HOME, ".config", "opencode", "skills"),
   parseServers: (c) => parseJsonServers(c, { mcpKey: MCP_KEY, fromEntry }),
   buildServersFile: (c, desired, owned) =>
     buildJsonServersFile(c, desired, owned, {

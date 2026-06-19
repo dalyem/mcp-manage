@@ -41,7 +41,8 @@ function AgentCard({
   const hasPending = !!(
     s.pendingServers ||
     s.pendingInstructions ||
-    s.pendingSubagents.length
+    s.pendingSubagents.length ||
+    s.pendingSkills.length
   );
 
   return (
@@ -138,6 +139,15 @@ function AgentCard({
                     {sa.path}
                   </div>
                   <DiffView diff={sa.diff} />
+                </div>
+              ))}
+              {s.pendingSkills.map((sk) => (
+                <div key={sk.dir}>
+                  <div className="mb-1 font-mono text-[11px] text-zinc-500">
+                    {sk.deleted ? "delete " : ""}
+                    {sk.dir}
+                  </div>
+                  <DiffView diff={sk.diff} />
                 </div>
               ))}
             </div>

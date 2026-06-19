@@ -81,6 +81,63 @@ export function removeFile(p: string): void {
 }
 
 /**
+ * Every regular file under `dir`, recursively, as POSIX-relative paths (using
+ * "/" separators to match skill_files.path). Returns [] if `dir` is absent.
+ */
+export function listFilesRecursive(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (abs: string, rel: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childAbs = path.join(abs, e.name);
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(childAbs, childRel);
+      else if (e.isFile()) out.push(childRel);
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+/** Read a file as raw bytes, or null if it can't be read. */
+export function readBytes(p: string): Buffer | null {
+  try {
+    return fs.readFileSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** Write raw bytes, creating parent directories as needed. */
+export function writeBytes(p: string, data: Buffer): void {
+  ensureDirFor(p);
+  fs.writeFileSync(p, data);
+}
+
+/**
+ * Remove `dir` and any parent dirs that become empty, climbing UP but never to
+ * or past `stopAt`. Best-effort; never throws. Used to prune an emptied skill
+ * directory (and empty nested subdirs) after its files are deleted.
+ */
+export function removeEmptyDirs(dir: string, stopAt: string): void {
+  let cur = path.resolve(dir);
+  const stop = path.resolve(stopAt);
+  while (cur !== stop && cur.startsWith(stop + path.sep)) {
+    try {
+      fs.rmdirSync(cur); // succeeds only when the directory is empty
+    } catch {
+      break; // not empty (or already gone) — stop climbing
+    }
+    cur = path.dirname(cur);
+  }
+}
+
+/**
  * Conservatively strip comments from JSONC so we can parse files like
  * opencode.json that allow `//` and `/* *\/` comments. We only remove
  * whole-line `//` comments (first non-whitespace is `//`) and block
