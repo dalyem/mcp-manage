@@ -363,6 +363,7 @@ function computeSkillChanges(
 
   const changes: SkillChange[] = [];
   const desiredNames = new Set(desired.map((d) => d.name));
+  const ownedNames = new Set(owned);
 
   for (const skill of desired) {
     const dir = path.join(skillsDir, skill.name);
@@ -399,20 +400,25 @@ function computeSkillChanges(
       }
     }
 
-    // Prune files under this (owned) skill dir that are no longer desired.
-    for (const relPath of listFilesRecursive(dir)) {
-      if (tree.has(relPath)) continue;
-      const absPath = skillFileAbs(dir, relPath);
-      ops.push({
-        relPath,
-        absPath,
-        kind: "delete",
-        encoding: "utf8",
-        content: "",
-        before: readText(absPath),
-        after: null,
-        changed: true,
-      });
+    // Prune stale files only under skill dirs we already own — never on a
+    // skill's first sync. The owned-set is recorded only AFTER a successful
+    // sync, so a brand-new skill is absent here on its first pass; pruning it
+    // would delete a pre-existing user directory's files on name collision.
+    if (ownedNames.has(skill.name)) {
+      for (const relPath of listFilesRecursive(dir)) {
+        if (tree.has(relPath)) continue;
+        const absPath = skillFileAbs(dir, relPath);
+        ops.push({
+          relPath,
+          absPath,
+          kind: "delete",
+          encoding: "utf8",
+          content: "",
+          before: readText(absPath),
+          after: null,
+          changed: true,
+        });
+      }
     }
 
     changes.push({
