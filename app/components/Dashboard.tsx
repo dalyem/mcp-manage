@@ -5,6 +5,7 @@ import type {
   AgentMeta,
   AgentStatus,
   BackupDTO,
+  GitHubConfigPublic,
   ServerDTO,
   StatusResponse,
   SubagentDTO,
@@ -17,6 +18,7 @@ import { ServersPanel } from "./ServersPanel";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { InstructionsPanel } from "./InstructionsPanel";
 import { BackupsPanel } from "./BackupsPanel";
+import { GitHubPanel } from "./GitHubPanel";
 
 function globalLevel(status: AgentStatus[]): "ok" | "warn" | "error" | "muted" {
   const active = status.filter((s) => s.present && s.manageEnabled);
@@ -43,6 +45,7 @@ export function Dashboard() {
   const [subagents, setSubagents] = useState<SubagentDTO[]>([]);
   const [instructions, setInstructions] = useState("");
   const [backups, setBackups] = useState<BackupDTO[]>([]);
+  const [githubConfig, setGithubConfig] = useState<GitHubConfigPublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,12 +53,13 @@ export function Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [st, sv, sa, instr, bk] = await Promise.all([
+      const [st, sv, sa, instr, bk, gh] = await Promise.all([
         getJSON<StatusResponse>("/api/status"),
         getJSON<{ servers: ServerDTO[] }>("/api/servers"),
         getJSON<{ subagents: SubagentDTO[] }>("/api/subagents"),
         getJSON<{ content: string }>("/api/instructions"),
         getJSON<{ backups: BackupDTO[] }>("/api/backups"),
+        getJSON<{ config: GitHubConfigPublic }>("/api/github/config"),
       ]);
       setStatus(st.status);
       setAgents(st.agents);
@@ -63,6 +67,7 @@ export function Dashboard() {
       setSubagents(sa.subagents);
       setInstructions(instr.content);
       setBackups(bk.backups);
+      setGithubConfig(gh.config);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -179,6 +184,11 @@ export function Dashboard() {
           <SubagentsPanel subagents={subagents} onChanged={onChanged} />
           <InstructionsPanel content={instructions} onSaved={onChanged} />
           <BackupsPanel backups={backups} onRestored={onChanged} />
+          <GitHubPanel
+            config={githubConfig}
+            onChanged={onChanged}
+            flash={flash}
+          />
         </div>
       )}
 

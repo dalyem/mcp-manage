@@ -6,6 +6,7 @@ import {
   type ServerInput,
 } from "@/lib/data";
 import { syncAll } from "@/lib/sync/engine";
+import { maybeAutoBackup } from "@/lib/github/backup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +36,7 @@ export async function POST(req: Request) {
   try {
     const id = createServer(input);
     const results = syncAll();
+    maybeAutoBackup();
     return NextResponse.json({ id, results }, { status: 201 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
