@@ -141,17 +141,20 @@ export async function pushFiles(
   message: string,
 ): Promise<PushResult> {
   const base = repoPath(cfg);
-  const baseSha = await getRefSha(cfg);
+  let baseSha = await getRefSha(cfg);
 
-  let baseTreeSha: string | undefined;
-  if (baseSha) {
-    const commit = await gh<{ tree: { sha: string } }>(
-      cfg,
-      "GET",
-      `${base}/git/commits/${baseSha}`,
-    );
-    baseTreeSha = commit.tree.sha;
-  }
+  // A repository with zero commits has no Git database yet, so the Git Data API
+  // (blobs/trees/commits) replies 409 "Git Repository is empty." Initialise the
+  // branch with one commit via the Contents API, then build the backup on it.
+  // https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database
+  if (baseSha === null) baseSha = await initBranch(cfg);
+
+  const baseCommit = await gh<{ tree: { sha: string } }>(
+    cfg,
+    "GET",
+    `${base}/git/commits/${baseSha}`,
+  );
+  const baseTreeSha = baseCommit.tree.sha;
 
   const tree = await Promise.all(
     files.map(async (f) => {
@@ -168,42 +171,54 @@ export async function pushFiles(
     }),
   );
 
-  const newTree = await gh<{ sha: string }>(
-    cfg,
-    "POST",
-    `${base}/git/trees`,
-    baseTreeSha ? { base_tree: baseTreeSha, tree } : { tree },
-  );
+  const newTree = await gh<{ sha: string }>(cfg, "POST", `${base}/git/trees`, {
+    base_tree: baseTreeSha,
+    tree,
+  });
 
   const commit = await gh<{ sha: string; html_url: string }>(
     cfg,
     "POST",
     `${base}/git/commits`,
-    { message, tree: newTree.sha, parents: baseSha ? [baseSha] : [] },
+    { message, tree: newTree.sha, parents: [baseSha] },
   );
 
-  if (baseSha) {
-    try {
-      await gh(cfg, "PATCH", `${base}/git/refs/heads/${cfg.branch}`, {
-        sha: commit.sha,
-        force: false,
-      });
-    } catch (e) {
-      if (e instanceof GitHubError && e.status === 422)
-        throw new GitHubError(
-          "The remote branch moved since the backup was prepared — click Backup again.",
-          422,
-        );
-      throw e;
-    }
-  } else {
-    await gh(cfg, "POST", `${base}/git/refs`, {
-      ref: `refs/heads/${cfg.branch}`,
+  try {
+    await gh(cfg, "PATCH", `${base}/git/refs/heads/${cfg.branch}`, {
       sha: commit.sha,
+      force: false,
     });
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 422)
+      throw new GitHubError(
+        "The remote branch moved since the backup was prepared — click Backup again.",
+        422,
+      );
+    throw e;
   }
 
   return { commitSha: commit.sha, commitUrl: commit.html_url };
+}
+
+/**
+ * Initialise an empty repository's branch with a single commit via the Contents
+ * API, returning the new commit SHA. The Git Data API (blobs/trees/commits) 409s
+ * on a repo with no commits, so the backup push needs a base commit to build on.
+ */
+async function initBranch(cfg: GitHubConfig): Promise<string> {
+  const seedPath = prefixed(cfg, ".gitkeep");
+  const urlPath = seedPath.split("/").map(encodeURIComponent).join("/");
+  const res = await gh<{ commit: { sha: string } }>(
+    cfg,
+    "PUT",
+    `${repoPath(cfg)}/contents/${urlPath}`,
+    {
+      message: "Initialize mcp-manage backup branch",
+      content: Buffer.from("mcp-manage backups\n", "utf8").toString("base64"),
+      branch: cfg.branch,
+    },
+  );
+  return res.commit.sha;
 }
 
 const SNAPSHOT_FILE_RE = /^(manifest\.json|servers\.json|agents\.json|instructions\.md|subagents\/[^/]+\.md)$/;
